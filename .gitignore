@@ -1,0 +1,23 @@
+.env
+.env.*
+!.env.example
+!.env.template
+
+*.pem
+*.key
+.DS_Store
+
+node_modules/
+__pycache__/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+
+# local data / generated
+.next/
+*.db
+*.db-journal
+*.tsbuildinfo
+.playwright-mcp/

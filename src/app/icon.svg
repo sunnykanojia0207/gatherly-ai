@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="15" fill="#29172f" />
+  <circle cx="50" cy="14" r="7" fill="#a779ed" opacity="0.5" />
+  <circle cx="14" cy="52" r="5" fill="#f4a292" opacity="0.35" />
+  <text
+    x="32"
+    y="45"
+    text-anchor="middle"
+    font-family="Didot, 'Bodoni MT', Georgia, serif"
+    font-size="38"
+    fill="#f6effc"
+  >G</text>
+</svg>
