@@ -3,6 +3,10 @@
 !.env.example
 !.env.template
 
+# Local toolkit directories (not part of this submission)
+/.agents/
+/skills-library/
+
 *.pem
 *.key
 .DS_Store
