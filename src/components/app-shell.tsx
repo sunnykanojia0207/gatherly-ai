@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 import {
   CalendarDays,
   LayoutDashboard,
@@ -90,8 +91,41 @@ function DesktopNav() {
 
 function MobileNav() {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement>(null);
+  const firstRender = useRef(true);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    const active = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!nav || !active) return;
+
+    const maxScroll = nav.scrollWidth - nav.clientWidth;
+    if (maxScroll <= 0) {
+      firstRender.current = false;
+      return;
+    }
+
+    const navRect = nav.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    const target = Math.min(
+      Math.max(
+        nav.scrollLeft + activeRect.left - navRect.left - (nav.clientWidth - activeRect.width) / 2,
+        0,
+      ),
+      maxScroll,
+    );
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    nav.scrollTo({
+      left: target,
+      behavior: firstRender.current ? "instant" : reduceMotion ? "auto" : "smooth",
+    });
+    firstRender.current = false;
+  }, [pathname]);
+
   return (
     <nav
+      ref={navRef}
       aria-label="Main"
       className="no-scrollbar overflow-x-auto border-t border-on-dark/10 px-3 pb-2"
     >
