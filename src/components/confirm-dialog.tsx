@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 import { Button } from "@/components/ui";
 
@@ -26,6 +26,8 @@ export function ConfirmDialog({
   children?: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -37,8 +39,8 @@ export function ConfirmDialog({
   return (
     <dialog
       ref={dialogRef}
-      aria-labelledby="confirm-title"
-      aria-describedby="confirm-description"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
       onCancel={(event) => {
         event.preventDefault();
         onCancel();
@@ -52,10 +54,10 @@ export function ConfirmDialog({
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-danger">
           Please confirm
         </p>
-        <h2 id="confirm-title" className="mt-2 font-display text-2xl tracking-tight">
+        <h2 id={titleId} className="mt-2 font-display text-2xl tracking-tight">
           {title}
         </h2>
-        <p id="confirm-description" className="mt-2 text-sm leading-relaxed text-ink-soft">
+        <p id={descriptionId} className="mt-2 text-sm leading-relaxed text-ink-soft">
           {description}
         </p>
         {children ? <div className="mt-4">{children}</div> : null}
