@@ -123,6 +123,7 @@ src/
     timeline.ts        Task ordering, progress, overdue rules
     seed.ts            Demo data and starter budget categories
     storage.ts         localStorage load/save with schema validation
+    security-headers.ts Production security headers and CSP
     store.tsx          Client store: external store, actions, provider
     ideas.ts           Sample ideas by event type, idea keys and budget fit
     ai/
@@ -170,9 +171,46 @@ The default model is `gemini-3.8-flash` (structured outputs supported), matching
 acceptance test. Check current [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) before
 relying on cost estimates; a typical request returns four ideas.
 
-**Abuse protection:** the in-memory limiter is per server instance. Before exposing this publicly,
-add shared-store rate limiting or a platform WAF rule (for example Vercel Firewall), and consider
-adding authentication. The route is intentionally unauthenticated for this local-first demo.
+**Abuse protection:** the in-memory limiter is per server instance and trusts `x-forwarded-for`. It is
+not a public abuse control. Before exposing this publicly, add an edge limit in the hosting dashboard
+and set provider spend alerts.
+
+### Public-deployment hardening
+
+The route already rejects malformed input, caps the body at 16 KB, validates model output, uses a
+40-second timeout and a 2,048-token cap, and returns safe errors. Keep those controls; do not replace
+the in-memory limiter with a fake shared limiter.
+
+Add this Vercel Firewall rule in the dashboard (not stored in git):
+
+1. Vercel → project → **Firewall** → **Configure** → **New Rule**.
+2. Name it `Limit POST /api/ideas`.
+3. Add two **If** conditions (all must match):
+   - **Path** equals `/api/ideas`
+   - **Method** equals `POST`
+4. **Then** → **Rate Limit** → **Fixed Window** (availability depends on your plan).
+5. Set **Time Window** to `600` seconds, **Request Limit** to `12`, key to **IP**, and keep the
+   default **429** action.
+6. **Review Changes** → **Publish**.
+7. Monitor **Firewall** traffic for the rule. Do not test the limit by sending abusive traffic.
+
+Equivalent CLI after linking the project and authenticating:
+
+```bash
+vercel firewall rules add "Limit POST /api/ideas" \
+  --condition '{"type":"path","op":"eq","value":"/api/ideas"}' \
+  --condition '{"type":"method","op":"eq","value":"POST"}' \
+  --action rate_limit \
+  --rate-limit-window 600 \
+  --rate-limit-requests 12 \
+  --rate-limit-keys ip \
+  --rate-limit-action rate_limit \
+  --yes
+```
+
+The edge rule runs before the function and reduces abuse, but it is not a provider spend cap. In
+Google Cloud Billing, set a budget with alerts for the project that owns `GEMINI_API_KEY`, and
+monitor usage in Google AI Studio. Rotate the key if it is exposed.
 
 **Privacy:** the event name, type, date, location, guest count, budget, theme, priorities, budget
 categories, and any constraints you type are sent to Google when you generate ideas. Do not enter
@@ -194,15 +232,29 @@ Keep both values server-only; do not use a `NEXT_PUBLIC_` prefix. If your server
 function duration below 40 seconds, raise it or lower `REQUEST_TIMEOUT_MS` in
 `src/lib/ai/generate.ts`.
 
+### Security headers
+
+Production responses set `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`,
+`Permissions-Policy`, and a Content Security Policy from
+`src/lib/security-headers.ts`. HSTS is left to the hosting platform so it is not duplicated.
+
+The CSP allows inline scripts and styles because Next.js prerenders inline bootstrap scripts and the
+UI uses React `style` attributes for progress widths. A nonce policy would require dynamic rendering
+through a Next.js Proxy. No application route adds CORS headers; `/api/ideas` stays same-origin.
+
 ## Known limitations
 
 - **Local-only data:** state is stored in one browser. There are no accounts, sync, sharing, or
   server backups; clearing site data removes the plan.
 - **No authentication:** `/api/ideas` is intentionally open for this demo. Do not expose it as a
-  public production service without auth and a shared or edge rate limit.
+  public production service without auth and a shared or edge rate limit. The Vercel Firewall rule
+  above must be created in the dashboard; it is not active from this repository.
 - **Best-effort rate limiting:** the in-memory limiter is per server instance and trusts
   `x-forwarded-for`; run behind a proxy that overwrites that header and add a platform/WAF limit
   before public use.
+- **CSP uses `'unsafe-inline'` for scripts and styles:** required by Next.js inline bootstrap output
+  and existing inline style attributes. Tighten it with a nonce if the pages move to dynamic
+  rendering.
 - **Live AI is optional and variable:** requests can take around 20 seconds or fail. Curated ideas
   remain available. Event details and any constraints are sent to Google when live AI is used.
 - **Not every integration is built:** payments, calendar sync, email, and vendor messaging are
@@ -219,6 +271,7 @@ Unit tests are colocated with the domain modules and cover the rules most likely
 - event and vendor validation, including past-date rejection
 - demo totals (exactly ₹4,50,000) and seed id uniqueness
 - AI request/output contracts, prompt contents, action-to-section mapping, and stored idea keys
+- production security headers, including the CSP and the absence of CORS/HSTS overrides
 - `/api/ideas` behaviour with a mocked Gemini SDK: valid generation, event context propagation,
   invalid payloads, missing key, malformed output, timeout, rate limit, and error sanitization
 
