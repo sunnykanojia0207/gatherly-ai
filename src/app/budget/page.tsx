@@ -19,7 +19,7 @@ import {
   Progress,
   SectionHeading,
 } from "@/components/ui";
-import { budgetHealth, budgetSummary, type BudgetHealth } from "@/lib/budget";
+import { budgetHealth, budgetSummary, findLowestQuote, type BudgetHealth } from "@/lib/budget";
 import { formatINR } from "@/lib/format";
 import { categoryColor } from "@/lib/palette";
 import type { BudgetItem, VendorRecord } from "@/lib/schema";
@@ -36,36 +36,6 @@ const HEALTH_TONE: Record<BudgetHealth, "danger" | "warning" | "positive"> = {
   tight: "warning",
   healthy: "positive",
 };
-
-const STOP_WORDS = new Set(["and", "the", "for", "with", "extra", "extras"]);
-
-function categoryMatches(vendorCategory: string, itemName: string): boolean {
-  const vendorWords = vendorCategory
-    .toLowerCase()
-    .split(/[^a-z]+/)
-    .filter((word) => word.length > 3 && !STOP_WORDS.has(word));
-  const itemWords = itemName
-    .toLowerCase()
-    .split(/[^a-z]+/)
-    .filter((word) => word.length > 3 && !STOP_WORDS.has(word));
-  return (
-    vendorWords.some((word) => itemName.toLowerCase().includes(word)) ||
-    itemWords.some((word) => vendorCategory.toLowerCase().includes(word))
-  );
-}
-
-function lowestQuote(
-  vendors: ReadonlyArray<VendorRecord>,
-  itemName: string,
-): VendorRecord | null {
-  return (
-    vendors
-      .filter(
-        (vendor) => vendor.status !== "declined" && categoryMatches(vendor.category, itemName),
-      )
-      .sort((a, b) => a.quotedCost - b.quotedCost)[0] ?? null
-  );
-}
 
 function AllocationRing({
   segments,
@@ -176,7 +146,7 @@ export default function BudgetPage() {
   }));
 
   const quoteRows = orderedItems
-    .map((item) => ({ item, vendor: lowestQuote(vendors, item.name) }))
+    .map((item) => ({ item, vendor: findLowestQuote(vendors, item.name) }))
     .filter((row): row is { item: BudgetItem; vendor: VendorRecord } => row.vendor !== null);
 
   function handleAmount(item: BudgetItem, raw: string) {
@@ -260,36 +230,42 @@ export default function BudgetPage() {
           <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3">
             <div>
               <dt className="text-xs text-ink-soft">Planned</dt>
-              <dd className="mt-1 font-display text-[1.6rem] leading-tight text-ink">
-                {formatINR(summary.planned)}
+              <dd className="mt-1">
+                <span className="block font-display text-[1.6rem] leading-tight text-ink">
+                  {formatINR(summary.planned)}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-ink-faint">
+                  {Math.round(summary.utilisation * 100)}% of total
+                </span>
               </dd>
-              <p className="mt-0.5 text-[11px] text-ink-faint">
-                {Math.round(summary.utilisation * 100)}% of total
-              </p>
             </div>
             <div>
               <dt className="text-xs text-ink-soft">
                 {summary.remaining < 0 ? "Over by" : "Remaining"}
               </dt>
-              <dd
-                className={`mt-1 font-display text-[1.6rem] leading-tight ${
-                  summary.remaining < 0 ? "text-danger" : "text-positive"
-                }`}
-              >
-                {formatINR(Math.abs(summary.remaining))}
+              <dd className="mt-1">
+                <span
+                  className={`block font-display text-[1.6rem] leading-tight ${
+                    summary.remaining < 0 ? "text-danger" : "text-positive"
+                  }`}
+                >
+                  {formatINR(Math.abs(summary.remaining))}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-ink-faint">
+                  {summary.remaining < 0 ? "Reduce category amounts" : "Still to allocate"}
+                </span>
               </dd>
-              <p className="mt-0.5 text-[11px] text-ink-faint">
-                {summary.remaining < 0 ? "Reduce category amounts" : "Still to allocate"}
-              </p>
             </div>
             <div className="col-span-2 sm:col-span-1">
               <dt className="text-xs text-ink-soft">Total budget</dt>
-              <dd className="mt-1 font-display text-[1.6rem] leading-tight text-ink">
-                {formatINR(activeEvent.totalBudget)}
+              <dd className="mt-1">
+                <span className="block font-display text-[1.6rem] leading-tight text-ink">
+                  {formatINR(activeEvent.totalBudget)}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-ink-faint">
+                  Set when the event was created
+                </span>
               </dd>
-              <p className="mt-0.5 text-[11px] text-ink-faint">
-                Set when the event was created
-              </p>
             </div>
           </dl>
           <Progress

@@ -37,6 +37,46 @@ function errorResponse(status: number, code: string, message: string) {
   );
 }
 
+type BodyRead =
+  | { ok: true; body: string }
+  | { ok: false; status: 400 | 413 };
+
+/** Read at most the cap, then cancel the request stream immediately. */
+async function readBody(request: Request): Promise<BodyRead> {
+  if (!request.body) return { ok: true, body: "" };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {});
+        return { ok: false, status: 413 };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    await reader.cancel().catch(() => {});
+    return { ok: false, status: 400 };
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return { ok: true, body: new TextDecoder().decode(bytes) };
+}
+
 export async function POST(request: Request) {
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
@@ -52,19 +92,17 @@ export async function POST(request: Request) {
   }
 
   const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > MAX_BODY_BYTES) {
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
     return errorResponse(413, "invalid_request", "That request is too large.");
   }
 
-  let body: string;
-  try {
-    body = await request.text();
-  } catch {
-    return errorResponse(400, "invalid_request", "Send a JSON request body.");
+  const read = await readBody(request);
+  if (!read.ok) {
+    return read.status === 413
+      ? errorResponse(413, "invalid_request", "That request is too large.")
+      : errorResponse(400, "invalid_request", "Send a JSON request body.");
   }
-  if (body.length > MAX_BODY_BYTES) {
-    return errorResponse(413, "invalid_request", "That request is too large.");
-  }
+  const body = read.body;
 
   let raw: unknown;
   try {

@@ -124,9 +124,19 @@ export default function VendorsPage() {
   const [statusFilter, setStatusFilter] = useState<VendorStatus | "all">("all");
   const [deleteTarget, setDeleteTarget] = useState<VendorRecord | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
 
   useEffect(() => {
-    if (formMode !== "closed") panelRef.current?.focus();
+    if (formMode !== "closed") {
+      panelRef.current?.focus();
+    } else if (wasOpen.current) {
+      const target = returnFocusRef.current;
+      if (target?.isConnected) target.focus();
+      else toggleRef.current?.focus();
+    }
+    wasOpen.current = formMode !== "closed";
   }, [formMode]);
 
   if (!ready) return <LoadingPanel label="Loading vendors" />;
@@ -173,6 +183,8 @@ export default function VendorsPage() {
   }
 
   function openAdd() {
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setForm(EMPTY_FORM);
     setEditingId(null);
     setErrors({});
@@ -180,6 +192,8 @@ export default function VendorsPage() {
   }
 
   function openEdit(vendor: VendorRecord) {
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setForm(toForm(vendor));
     setEditingId(vendor.id);
     setErrors({});
@@ -236,6 +250,7 @@ export default function VendorsPage() {
           {booked} of {vendors.length} booked
         </Badge>
         <Button
+          ref={toggleRef}
           onClick={() => {
             if (formMode === "closed") openAdd();
             else closeForm();
@@ -640,7 +655,10 @@ export default function VendorsPage() {
         confirmLabel="Delete vendor"
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => {
-          if (deleteTarget) actions.deleteVendor(deleteTarget.id);
+          if (deleteTarget) {
+            actions.deleteVendor(deleteTarget.id);
+            setStatus(`Deleted ${deleteTarget.name}.`);
+          }
           setDeleteTarget(null);
         }}
       />

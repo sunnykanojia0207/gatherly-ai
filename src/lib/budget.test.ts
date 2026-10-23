@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { budgetHealth, budgetSummary } from "./budget";
+import { budgetHealth, budgetSummary, categoryMatches, findLowestQuote } from "./budget";
+import type { VendorRecord } from "./schema";
 
 function summaryFor(planned: number, total: number) {
   return budgetSummary([{ amount: planned }], total);
@@ -43,5 +44,51 @@ describe("budgetHealth", () => {
 
   it("is healthy below 85%", () => {
     expect(budgetHealth(summaryFor(382_499, 450_000))).toBe("healthy");
+  });
+});
+
+function vendor(overrides: Partial<VendorRecord> & Pick<VendorRecord, "id">): VendorRecord {
+  return {
+    eventId: "event-1",
+    name: overrides.id,
+    category: "Catering",
+    contact: "",
+    estimatedCost: 0,
+    quotedCost: 0,
+    status: "contacted",
+    followUpDate: "",
+    notes: "",
+    createdAt: "2026-10-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("categoryMatches", () => {
+  it("matches words regardless of accents or case", () => {
+    expect(categoryMatches("Decor", "Décor extras")).toBe(true);
+    expect(categoryMatches("DÉCOR", "Decor")).toBe(true);
+  });
+
+  it("ignores short and filler words", () => {
+    expect(categoryMatches("and extras", "Décor")).toBe(false);
+  });
+});
+
+describe("findLowestQuote", () => {
+  it("picks the lowest active quote for a matching category", () => {
+    const vendors = [
+      vendor({ id: "high", quotedCost: 14_000 }),
+      vendor({ id: "declined", quotedCost: 8_000, status: "declined" }),
+      vendor({ id: "no-quote", quotedCost: 0 }),
+      vendor({ id: "low", quotedCost: 11_000 }),
+      vendor({ id: "unrelated", category: "Photography", quotedCost: 5_000 }),
+    ];
+
+    expect(findLowestQuote(vendors, "Catering")?.id).toBe("low");
+  });
+
+  it("returns null when no quote matches", () => {
+    expect(findLowestQuote([vendor({ id: "photo", category: "Photography" })], "Catering")).toBeNull();
+    expect(findLowestQuote([vendor({ id: "zero", quotedCost: 0 })], "Catering")).toBeNull();
   });
 });

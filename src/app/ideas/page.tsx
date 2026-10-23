@@ -489,7 +489,9 @@ export default function IdeasPage() {
                   className={`h-1.5 w-1.5 rounded-full ${SECTION_META[section.id].dot}`}
                 />
                 {section.label}
-                <span className="tabular-nums text-ink-faint">{count}</span>
+                <span className={`tabular-nums ${active ? "text-current" : "text-ink-faint"}`}>
+                  {count}
+                </span>
               </button>
             );
           })}

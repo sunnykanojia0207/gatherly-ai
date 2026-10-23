@@ -23,7 +23,7 @@ import {
   type VendorInput,
   type VendorRecord,
 } from "./schema";
-import { loadState, saveState } from "./storage";
+import { loadState, saveState, type StorageNotice } from "./storage";
 import { todayISO } from "./format";
 import { aiIdeaKey, ideaBelongsToEvent } from "./ideas";
 import type { AiAction } from "./labels";
@@ -209,12 +209,16 @@ interface Snapshot {
   state: AppState;
   ready: boolean;
   storageWarning: boolean;
+  storageNotice: StorageNotice | null;
+  recoveryBlocked: boolean;
 }
 
 const SERVER_SNAPSHOT: Snapshot = {
   state: emptyState(),
   ready: false,
   storageWarning: false,
+  storageNotice: null,
+  recoveryBlocked: false,
 };
 
 interface StoreValue extends Snapshot {
@@ -230,12 +234,24 @@ function createStore() {
   function ensureLoaded() {
     if (loaded) return;
     loaded = true;
-    snapshot = { state: loadState() ?? emptyState(), ready: true, storageWarning: false };
+    const loadedState = loadState();
+    snapshot = {
+      state: loadedState.state ?? emptyState(),
+      ready: true,
+      storageWarning: false,
+      storageNotice: loadedState.notice,
+      recoveryBlocked: loadedState.blocked,
+    };
   }
 
   function commit(next: AppState) {
-    if (next === snapshot.state) return;
-    snapshot = { state: next, ready: true, storageWarning: !saveState(next) };
+    if (next === snapshot.state || snapshot.recoveryBlocked) return;
+    snapshot = {
+      ...snapshot,
+      state: next,
+      ready: true,
+      storageWarning: !saveState(next),
+    };
     for (const listener of listeners) listener();
   }
 

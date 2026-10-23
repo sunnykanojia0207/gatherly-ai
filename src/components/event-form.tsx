@@ -225,7 +225,6 @@ export function EventForm({ onCancel }: { onCancel?: () => void }) {
                     }
                   }}
                   disabled={index > step}
-                  aria-label={`Step ${index + 1}: ${item.short}`}
                   aria-current={active ? "step" : undefined}
                   className={`flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left text-sm transition-colors ${
                     active

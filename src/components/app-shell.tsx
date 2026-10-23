@@ -16,6 +16,7 @@ import {
 import { EVENT_TYPE_LABELS } from "@/lib/labels";
 import { formatDate } from "@/lib/format";
 import { useGatherly } from "@/lib/store";
+import type { RecoveryCounts, StorageNotice } from "@/lib/storage";
 import { Alert } from "@/components/ui";
 import { AtelierMark } from "@/components/motifs";
 
@@ -46,6 +47,89 @@ function Brand() {
 
 function isActive(pathname: string, href: string): boolean {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
+}
+
+const RECOVERY_LABELS: Array<{
+  key: keyof RecoveryCounts;
+  one: string;
+  many: string;
+}> = [
+  { key: "events", one: "event", many: "events" },
+  { key: "budgetItems", one: "budget category", many: "budget categories" },
+  { key: "tasks", one: "task", many: "tasks" },
+  { key: "vendors", one: "vendor", many: "vendors" },
+  { key: "savedIdeas", one: "saved idea", many: "saved ideas" },
+  { key: "dismissedIdeas", one: "set-aside idea", many: "set-aside ideas" },
+  { key: "generatedIdeas", one: "AI idea", many: "AI ideas" },
+];
+
+function describeCounts(counts: RecoveryCounts): string {
+  const parts = RECOVERY_LABELS.flatMap(({ key, one, many }) => {
+    const count = counts[key];
+    return count > 0 ? [`${count} ${count === 1 ? one : many}`] : [];
+  });
+
+  if (parts.length <= 1) return parts[0] ?? "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
+function noticeCopy(notice: StorageNotice): {
+  tone: "warning" | "danger";
+  role: "status" | "alert";
+  title: string;
+  body: string;
+} {
+  if (notice.kind === "recovered") {
+    const recovered = describeCounts(notice.recovered);
+    const dropped = describeCounts(notice.dropped);
+    return {
+      tone: "warning",
+      role: "status",
+      title: "Saved data was repaired",
+      body: [
+        recovered ? `Recovered ${recovered}.` : "No saved records could be read.",
+        dropped ? `${dropped} could not be recovered.` : "",
+        "The original saved data has been kept in this browser for recovery.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    };
+  }
+
+  if (notice.kind === "future-version") {
+    return {
+      tone: "danger",
+      role: "alert",
+      title: "Saved data is from a newer version",
+      body: "A newer version of Gatherly saved this browser's data. It has been left untouched, and editing is paused to avoid overwriting it. Open the newer version, or clear this site's data only if you no longer need it.",
+    };
+  }
+
+  if (notice.kind === "backup-failed") {
+    return {
+      tone: "danger",
+      role: "alert",
+      title: "Saved data needs attention",
+      body: "Gatherly found damaged saved data but could not make a recovery copy. Editing is paused so the original is not overwritten. Free browser storage, then reload.",
+    };
+  }
+
+  return {
+    tone: "warning",
+    role: "status",
+    title: "Local storage is unavailable",
+    body: "This browser blocked access to local storage, so saved data could not be loaded. Changes will last for this session only.",
+  };
+}
+
+function StorageNoticeAlert({ notice }: { notice: StorageNotice }) {
+  const copy = noticeCopy(notice);
+  return (
+    <Alert tone={copy.tone} role={copy.role} title={copy.title}>
+      {copy.body}
+    </Alert>
+  );
 }
 
 function DesktopNav() {
@@ -155,7 +239,7 @@ function MobileNav() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { activeEvent, storageWarning } = useGatherly();
+  const { activeEvent, storageWarning, storageNotice, recoveryBlocked } = useGatherly();
 
   return (
     <>
@@ -222,17 +306,42 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <main
             id="main"
-            className="workspace-glow mx-auto w-full max-w-[1180px] px-4 py-7 sm:px-6 sm:py-9 lg:px-10 lg:py-11"
+            tabIndex={-1}
+            className="workspace-glow mx-auto w-full max-w-[1180px] px-4 py-7 outline-none sm:px-6 sm:py-9 lg:px-10 lg:py-11"
           >
-            {storageWarning ? (
+            {recoveryBlocked ? (
               <div className="mb-6">
-                <Alert tone="warning" title="Changes are not being saved">
-                  This browser blocked local storage, so edits will disappear on refresh. Check
-                  private-mode settings or storage permissions.
-                </Alert>
+                {storageNotice ? (
+                  <StorageNoticeAlert notice={storageNotice} />
+                ) : (
+                  <Alert
+                    tone="danger"
+                    role="alert"
+                    title="Saved data needs attention"
+                  >
+                    Editing is paused so saved data is not overwritten. Reload after checking
+                    browser storage permissions.
+                  </Alert>
+                )}
               </div>
-            ) : null}
-            {children}
+            ) : (
+              <>
+                {storageNotice ? (
+                  <div className="mb-6">
+                    <StorageNoticeAlert notice={storageNotice} />
+                  </div>
+                ) : null}
+                {storageWarning ? (
+                  <div className="mb-6">
+                    <Alert tone="warning" title="Changes are not being saved">
+                      This browser blocked local storage, so edits will disappear on refresh. Check
+                      private-mode settings or storage permissions.
+                    </Alert>
+                  </div>
+                ) : null}
+                {children}
+              </>
+            )}
           </main>
 
           <footer className="mx-auto flex w-full max-w-[1180px] flex-wrap items-center justify-between gap-2 px-4 pb-10 text-[11px] text-ink-faint sm:px-6 lg:px-10">

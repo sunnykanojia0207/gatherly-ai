@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type {
-  ButtonHTMLAttributes,
+  ComponentPropsWithRef,
   CSSProperties,
   InputHTMLAttributes,
   ReactNode,
@@ -37,7 +37,7 @@ export function Button({
   className = "",
   type = "button",
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
+}: ComponentPropsWithRef<"button"> & { variant?: ButtonVariant }) {
   return <button type={type} className={buttonClass(variant, className)} {...props} />;
 }
 
@@ -260,10 +260,12 @@ export function Progress({
 export function Alert({
   tone = "warning",
   title,
+  role = "status",
   children,
 }: {
   tone?: "warning" | "danger" | "positive";
   title: string;
+  role?: "status" | "alert";
   children: ReactNode;
 }) {
   const tones = {
@@ -272,7 +274,7 @@ export function Alert({
     positive: "border-positive/25 bg-positive-soft text-positive",
   };
   return (
-    <div role="status" className={`flex gap-3 rounded-xl border p-4 text-sm ${tones[tone]}`}>
+    <div role={role} className={`flex gap-3 rounded-xl border p-4 text-sm ${tones[tone]}`}>
       <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
       <div>
         <p className="font-semibold">{title}</p>

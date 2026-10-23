@@ -1,7 +1,7 @@
 "use client";
 
 import { CalendarClock, Check, ListChecks, Pencil, Plus, Trash2 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
@@ -51,6 +51,13 @@ function TaskItem({
   const [editDue, setEditDue] = useState(task.dueDate);
   const [editPriority, setEditPriority] = useState<TaskPriority>(task.priority);
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+
+  useEffect(() => {
+    if (wasEditing.current && !editing) editButtonRef.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
 
   const overdue = isOverdue(task, today);
 
@@ -174,6 +181,7 @@ function TaskItem({
 
       <div className="flex shrink-0 items-center">
         <Button
+          ref={editButtonRef}
           variant="ghost"
           onClick={startEdit}
           aria-label={`Edit ${task.title}`}

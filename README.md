@@ -99,11 +99,24 @@ All state lives in the browser at `localStorage["gatherly.state.v1"]`:
 - `tasks` — timeline items, each linked to an event
 - `vendors` — vendor records, each linked to an event
 - `savedIdeas` / `dismissedIdeas` — idea keys the user kept or set aside, per event
-- `generatedIdeas` — Gemini ideas kept for the active event, so saved cards survive a refresh
+- `generatedIdeas` — Gemini ideas kept for the active event (capped at 200), so saved cards survive
+  a refresh
 
-State is validated with Zod on load (`src/lib/storage.ts`). Invalid or corrupted data is discarded
-rather than crashing the app. If the browser blocks storage, the shell shows a warning and changes
-last only for the session.
+State is validated with Zod on load (`src/lib/storage.ts`). Records are validated individually, so a
+malformed event, budget category, task, vendor, or idea does not discard the valid records around it.
+References to events that did not survive validation are removed only after the event set is checked.
+A repaired state shows an accessible warning with what was recovered and what was left out.
+
+Before repairing or replacing corrupted data, Gatherly copies the original raw value to a
+versioned key such as `gatherly.state.v1.backup.<fingerprint>`. Existing backups are never
+overwritten; a different value gets the next slot. Reloading does not create duplicate backups for
+the same value. The warning says when the original is preserved. If the recovery copy cannot be
+written (for example, because the storage quota is full), editing pauses and the original main entry
+is left untouched rather than overwriting it.
+
+An unsupported future schema version is left untouched and editing pauses, rather than downgrading
+it. If the browser blocks storage entirely, the shell shows a warning and changes last only for the
+session. These are browser-local recovery copies, not server backups.
 
 The demo event uses the stable id `event-demo`. **Reset demo** replaces only the demo event and its
 data; other events are preserved. Deleting an event cascades to its budget, tasks, vendors, and
@@ -122,7 +135,7 @@ src/
     budget.ts          Budget summary and health rules
     timeline.ts        Task ordering, progress, overdue rules
     seed.ts            Demo data and starter budget categories
-    storage.ts         localStorage load/save with schema validation
+    storage.ts         localStorage load/save, record salvage, recovery copies
     security-headers.ts Production security headers and CSP
     store.tsx          Client store: external store, actions, provider
     ideas.ts           Sample ideas by event type, idea keys and budget fit
@@ -160,8 +173,10 @@ experience.
   the route handler. `GEMINI_API_KEY` is never returned to the client.
 - **Contracts:** the request, model output, and stored response are separate Zod schemas. Unknown
   request fields are rejected; malformed model output is rejected rather than saved.
-- **Guardrails:** 16 KB body cap, 12 requests per 10 minutes per IP, 40-second SDK timeout, 2,048
-  output tokens, no retries, and provider messages are replaced with safe copy.
+- **Guardrails:** 16 KB body cap enforced while streaming (so it also applies to chunked requests
+  with no `Content-Length`), 12 requests per 10 minutes per IP, 40-second SDK timeout, 2,048 output
+  tokens, no retries, and provider messages are replaced with safe copy. Oversized or unreadable
+  bodies return a safe error before Gemini is called.
 - **Provenance:** AI cards say **Gemini** and curated cards say **Curated**. Curated ideas remain
   available if the key is missing, the model fails, or the request is rate-limited.
 - **Retries:** regenerating an action replaces its unsaved Gemini ideas. Cards you saved or set
@@ -177,9 +192,10 @@ and set provider spend alerts.
 
 ### Public-deployment hardening
 
-The route already rejects malformed input, caps the body at 16 KB, validates model output, uses a
-40-second timeout and a 2,048-token cap, and returns safe errors. Keep those controls; do not replace
-the in-memory limiter with a fake shared limiter.
+The route already rejects malformed input, caps the body at 16 KB while streaming, validates model
+output, uses a 40-second timeout and a 2,048-token cap, and returns safe errors. Keep those controls;
+do not replace the in-memory limiter with a fake shared limiter, and do not rely on a platform body
+limit as the application cap.
 
 Add this Vercel Firewall rule in the dashboard (not stored in git):
 
@@ -245,7 +261,9 @@ through a Next.js Proxy. No application route adds CORS headers; `/api/ideas` st
 ## Known limitations
 
 - **Local-only data:** state is stored in one browser. There are no accounts, sync, sharing, or
-  server backups; clearing site data removes the plan.
+  server backups; clearing site data removes the plan and its local recovery copies. Recovery copies
+  protect against malformed or partially unreadable saved data, not against clearing site data,
+  browser loss, or a full storage quota.
 - **No authentication:** `/api/ideas` is intentionally open for this demo. Do not expose it as a
   public production service without auth and a shared or edge rate limit. The Vercel Firewall rule
   above must be created in the dashboard; it is not active from this repository.
@@ -272,8 +290,13 @@ Unit tests are colocated with the domain modules and cover the rules most likely
 - demo totals (exactly ₹4,50,000) and seed id uniqueness
 - AI request/output contracts, prompt contents, action-to-section mapping, and stored idea keys
 - production security headers, including the CSP and the absence of CORS/HSTS overrides
+- storage recovery: per-record salvage, orphaned references, malformed JSON, future versions,
+  backup preservation, backup failure, and repeat-load behaviour
 - `/api/ideas` behaviour with a mocked Gemini SDK: valid generation, event context propagation,
   invalid payloads, missing key, malformed output, timeout, rate limit, and error sanitization
+- request body enforcement: boundary size, multibyte text, chunked bodies without
+  `Content-Length`, early stream cancellation, misleading headers, interrupted streams, and no
+  Gemini call on rejection
 
 No test makes a paid API call. To test live generation, run the app with a key and use **Plan with
 Gemini** on `/ideas`. Browser E2E is checked manually; Playwright is not configured in this repo.

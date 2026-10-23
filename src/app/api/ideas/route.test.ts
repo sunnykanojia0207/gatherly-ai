@@ -63,6 +63,48 @@ function post(body: unknown, ip = crypto.randomUUID()) {
   );
 }
 
+function rawPost(body: BodyInit, headers: Record<string, string> = {}, ip = crypto.randomUUID()) {
+  return POST(
+    new Request("http://localhost:3000/api/ideas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": ip, ...headers },
+      body,
+    }),
+  );
+}
+
+function streamOf(text: string, chunkSize = 1_024): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+        controller.enqueue(bytes.slice(offset, offset + chunkSize));
+      }
+      controller.close();
+    },
+  });
+}
+
+function streamRequest(body: ReadableStream<Uint8Array>, headers: Record<string, string> = {}) {
+  const init = {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": crypto.randomUUID(), ...headers },
+    body,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" };
+  return new Request("http://localhost:3000/api/ideas", init);
+}
+
+function streamPost(body: ReadableStream<Uint8Array>, headers: Record<string, string> = {}) {
+  return POST(streamRequest(body, headers));
+}
+
+function exactLimitBody(): string {
+  const envelope = JSON.stringify({ ...requestBody(), padding: "" });
+  const pad = "x".repeat(16 * 1024 - new TextEncoder().encode(envelope).byteLength);
+  return JSON.stringify({ ...requestBody(), padding: pad });
+}
+
 beforeEach(() => {
   generateContent.mockReset();
   vi.stubEnv("GEMINI_API_KEY", "test-key-not-real");
@@ -235,6 +277,116 @@ describe("POST /api/ideas", () => {
     expect(JSON.stringify(body)).not.toContain("10.0.0.1");
   });
 
+  it("accepts a valid body below the limit", async () => {
+    generateContent.mockResolvedValue(modelPayload());
+    const body = JSON.stringify(requestBody());
+    expect(new TextEncoder().encode(body).byteLength).toBeLessThan(16 * 1024);
+
+    const response = await rawPost(body);
+    expect(response.status).toBe(200);
+  });
+
+  it("accepts valid JSON exactly at the 16 KB boundary without treating it as oversized", async () => {
+    const body = exactLimitBody();
+    expect(new TextEncoder().encode(body).byteLength).toBe(16 * 1024);
+
+    // Padding is an unknown field, so the schema rejects it with 400. The
+    // important assertion is that the byte cap itself does not return 413.
+    const response = await rawPost(body);
+    expect(response.status).toBe(400);
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("enforces the limit on a chunked body with no Content-Length", async () => {
+    const body = JSON.stringify({ padding: "x".repeat(20_000) });
+    const request = streamRequest(streamOf(body));
+    expect(request.headers.get("content-length")).toBeNull();
+
+    const response = await POST(request);
+    expect(response.status).toBe(413);
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("stops reading and cancels the stream as soon as the limit is exceeded", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const oversized = new Uint8Array(17 * 1024);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(oversized);
+          return;
+        }
+        controller.error(new Error("reader kept going after the cap"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    const response = await streamPost(stream);
+    expect(response.status).toBe(413);
+    expect(pulls).toBe(1);
+    expect(cancelled).toBe(true);
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("reads a valid chunked body with no Content-Length", async () => {
+    generateContent.mockResolvedValue(modelPayload());
+    const request = streamRequest(streamOf(JSON.stringify(requestBody()), 64));
+    expect(request.headers.get("content-length")).toBeNull();
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+  });
+
+  it("does not trust a misleading low Content-Length", async () => {
+    const response = await rawPost(
+      JSON.stringify({ padding: "x".repeat(20_000) }),
+      { "content-length": "10" },
+    );
+    expect(response.status).toBe(413);
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("returns a sanitized 400 for malformed JSON", async () => {
+    const response = await rawPost("{");
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.message).toBe("Send a JSON request body.");
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("returns a sanitized 400 for an empty body", async () => {
+    const response = await rawPost("");
+    expect(response.status).toBe(400);
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it("returns a sanitized 400 when the request stream fails", async () => {
+    let sent = false;
+    const failing = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!sent) {
+          sent = true;
+          controller.enqueue(new TextEncoder().encode('{"eventId":'));
+          return;
+        }
+        controller.error(new Error("socket reset at 10.0.0.1"));
+      },
+    });
+
+    const response = await streamPost(failing);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.message).toBe("Send a JSON request body.");
+    expect(JSON.stringify(body)).not.toContain("10.0.0.1");
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized body", async () => {
     const response = await POST(
       new Request("http://localhost:3000/api/ideas", {
@@ -244,5 +396,22 @@ describe("POST /api/ideas", () => {
       }),
     );
     expect(response.status).toBe(413);
+  });
+
+  it("rejects a body over 16 KB in UTF-8 even when its character count is lower", async () => {
+    const body = JSON.stringify({ padding: "界".repeat(6_000) });
+    expect(body.length).toBeLessThan(16 * 1024);
+    expect(new TextEncoder().encode(body).byteLength).toBeGreaterThan(16 * 1024);
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/ideas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-forwarded-for": crypto.randomUUID() },
+        body,
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(generateContent).not.toHaveBeenCalled();
   });
 });
